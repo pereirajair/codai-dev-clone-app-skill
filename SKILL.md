@@ -1,6 +1,6 @@
 ---
 name: clone-app-pat-pro
-description: Clones any web app pixel-for-pixel from a URL. Runs as an IN-CONVERSATION workflow — the live Claude orchestrates Task sub-agents and drives the Claude Chrome extension to recon (every view), extract (computed styles = ground truth), design-spec, build, QA (computed-style assertions), and extend. Guided check-ins, custom features, and an MCP server so an agent can operate the app. Use when cloning a site, replicating a web app, building a clone, copying a website, recreating a UI, or when told "clone this", "replicate this app", "copy this site", "build a clone of", "make a copy of this website", "recreate this UI".
+description: Clones any web app pixel-for-pixel from a URL. Runs as an IN-CONVERSATION workflow — the live Claude orchestrates Task sub-agents and drives a browser (Claude Chrome extension OR OpenCode browser_* tools) to recon (every view), extract (computed styles = ground truth), design-spec, build, QA (computed-style assertions), and extend. Guided check-ins, custom features, and an MCP server so an agent can operate the app. Use when cloning a site, replicating a web app, building a clone, copying a website, recreating a UI, or when told "clone this", "replicate this app", "copy this site", "build a clone of", "make a copy of this website", "recreate this UI".
 argument-hint: <url> <name>
 allowed-tools: Bash, Read, Write, Edit, Agent
 ---
@@ -15,16 +15,21 @@ Mission: **own the target, pixel for pixel.** Read every value off the live page
 
 This skill runs as a **workflow inside a live Claude session**, not a background script. When it's invoked, **YOU (the in-session agent) orchestrate it**: spawn Task sub-agents, drive the browser, check in with the user, run the helper scripts.
 
-**Browser tool = the Claude Chrome extension, only** (`mcp__claude-in-chrome__*`). You're already logged in, so it reaches authed sites. There is one Chrome — **one view/tab at a time** (browser stages are sequential). **Code stages fan out in parallel** via Task sub-agents (build each page, fix each file-set concurrently).
+**Browser tool** — use whichever is available in your environment. **One view/tab at a time** (browser stages are sequential). **Code stages fan out in parallel** via Task sub-agents.
 
-| Need | Chrome-extension tool |
-|---|---|
-| open a route | `mcp__claude-in-chrome__navigate` |
-| read computed styles / CSSOM / run JS | `mcp__claude-in-chrome__javascript_tool` (the verification ground truth) |
-| read DOM / find elements | `mcp__claude-in-chrome__read_page` / `find` |
-| click / hover / focus (interaction sweep) | `mcp__claude-in-chrome__computer` |
-| visual reference screenshot | `mcp__claude-in-chrome__computer` (`screenshot`) |
-| set viewport | `mcp__claude-in-chrome__resize_window` |
+**Detect your browser mode at startup:** if `mcp__claude-in-chrome__navigate` is available → Chrome Extension mode; if `browser_navigate` is available → OpenCode Browser mode. See [references/tooling.md](references/tooling.md) for full setup and tool mapping.
+
+| Need | Chrome Extension (`mcp__claude-in-chrome__*`) | OpenCode (`browser_*`) |
+|---|---|---|
+| open a route | `mcp__claude-in-chrome__navigate` | `browser_navigate` |
+| run JS / computed styles (ground truth) | `mcp__claude-in-chrome__javascript_tool` | `browser_evaluate` |
+| DOM snapshot / find elements | `mcp__claude-in-chrome__read_page` / `find` | `browser_snapshot` / `browser_search` |
+| click / hover / focus | `mcp__claude-in-chrome__computer` (left_click/hover) | `browser_click` / `browser_hover` |
+| screenshot | `mcp__claude-in-chrome__computer` (screenshot) | `browser_screenshot` (saves to disk!) |
+| set viewport | `mcp__claude-in-chrome__resize_window` | `browser_run_code` → `await page.setViewportSize({width:W,height:H})` |
+| press key / scroll | `mcp__claude-in-chrome__computer` (key) | `browser_press_key` / `browser_scroll` |
+
+**Auth note:** Chrome extension uses your already-logged-in Chrome session (reaches authed sites). OpenCode browser is Playwright/Chromium — unauthenticated by default. For authed target sites use the Chrome extension, or handle login programmatically via `browser_evaluate` / `browser_run_code`.
 
 **Screenshots are a VISUAL REFERENCE only.** The extension can't reliably write screenshot files to disk in this environment, so **do not build the gate on saved PNGs / pixel-diff.** Screenshots are for you and the user to eyeball the real site vs the clone. The **objective ground truth is computed styles** read via `javascript_tool` (the contract's own rule: CSSOM/computed values beat screenshots).
 

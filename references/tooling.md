@@ -4,33 +4,84 @@ This skill runs **in-conversation**: the live Claude session orchestrates the pi
 
 ---
 
-## 1. Browser capture — Claude Chrome extension
+## 1. Browser capture — detect your environment first
 
-All browser work — the real logged-in site, the localhost clone, and the QA diff loop — runs through the **Claude Chrome extension** (`mcp__claude-in-chrome__*`). You're already authed in Chrome, so the real target loads behind its login, and the localhost clone loads with no auth at all. The ground truth for verification is the **computed styles you read via `mcp__claude-in-chrome__javascript_tool`** (a `getComputedStyle` value on the real page vs. the same read on the clone); a screenshot is a visual reference only, not a value source.
+**Detect mode at startup:**
+- `mcp__claude-in-chrome__navigate` available → **Chrome Extension mode** (Claude Code)
+- `browser_navigate` available → **OpenCode Browser mode**
 
-**One Chrome, one tab at a time.** Never run two browser actions at once. Browser stages (recon, extraction, QA capture, polish) are **sequential**. Code stages (build-page, fix) fan out in parallel via Task sub-agents.
+**One view/tab at a time.** Browser stages (recon, extraction, QA capture, polish) are **sequential**. Code stages fan out in parallel via Task sub-agents.
 
-| What you're capturing | Tool | Why |
-|---|---|---|
-| The **real, logged-in site** (e.g. linear.app) | **Claude Chrome extension** (`mcp__claude-in-chrome__*`) | You're already authed in Chrome, so the real page loads behind its login. Read its computed styles via `mcp__claude-in-chrome__javascript_tool` for the verification ground truth; a `screenshot` is a visual reference only. |
-| The **localhost clone** (no auth) + the **QA diff loop** | **Claude Chrome extension** (`mcp__claude-in-chrome__*`) | The clone has no auth, so it loads directly. Compare the clone's `getComputedStyle` reads (via `mcp__claude-in-chrome__javascript_tool`) against the real page's, route by route. |
-
-### Browser-tool mapping
-
-**Real authed site (Chrome extension):** open route → `mcp__claude-in-chrome__navigate`; screenshot for visual reference → `mcp__claude-in-chrome__computer` (`screenshot`); read computed styles / CSSOM / run JS (the verification ground truth) → `mcp__claude-in-chrome__javascript_tool`; read DOM / find → `read_page` / `find`; click/hover/focus for the interaction sweep → `mcp__claude-in-chrome__computer`; viewport → `resize_window`.
-
-**Localhost clone (Chrome extension):** open route → `mcp__claude-in-chrome__navigate http://localhost:3000{route}`; set viewport → `mcp__claude-in-chrome__resize_window <w> <h>`; capture for visual reference → `mcp__claude-in-chrome__computer` (`screenshot`); read the clone's computed styles → `mcp__claude-in-chrome__javascript_tool`. Diff the clone's `getComputedStyle` reads against the real page's per route.
-
-Page/viewport keys are fixed by the contract: `desktop` (1920×1080), `tablet` (768×1024), `mobile` (375×667). Artifacts use `{page}--{viewport}` so the recon baseline and QA clone reads line up 1:1.
+Page/viewport keys: `desktop` (1920×1080), `tablet` (768×1024), `mobile` (375×667). Artifacts use `{page}--{viewport}` so recon and QA reads line up 1:1.
 
 ---
 
-## 2. Screenshots are a visual reference; computed styles are the ground truth (contract §11)
+### 1a. Chrome Extension (`mcp__claude-in-chrome__*`) — Claude Code
 
-A screenshot from the Chrome extension is a **visual reference only** — capture it to eyeball layout and catch obvious breakage, but treat it as an aid, not a workspace artifact (the file cannot be reliably saved to disk in this environment). Do not build verification on a PNG landing under `clone-workspace/{name}/.../screenshots/`.
+You're already authed in Chrome, so the real target loads behind its login. The ground truth is **computed styles via `mcp__claude-in-chrome__javascript_tool`**; a screenshot is a visual reference only (cannot be reliably saved to disk).
 
-- **Real authed site + localhost clone** (Chrome extension): take the shot with `mcp__claude-in-chrome__computer` (`screenshot`) for a quick visual check of the route at each viewport.
-- **The verdict is the computed style, not the image.** The thing that actually gates a match is `getComputedStyle` read via `mcp__claude-in-chrome__javascript_tool` — read the value on the real page, read the same value on the clone, and compare them. A measured value beats a visual impression every time.
+| What you're capturing | Tool | Why |
+|---|---|---|
+| **Real, logged-in site** | Chrome extension | Already authed in Chrome — real page loads behind login |
+| **Localhost clone** (no auth) + QA loop | Chrome extension | Clone loads directly; compare `getComputedStyle` reads vs real page |
+
+**Tool mapping (Chrome extension):**
+
+| Need | Tool |
+|---|---|
+| open route | `mcp__claude-in-chrome__navigate` |
+| run JS / computed styles (ground truth) | `mcp__claude-in-chrome__javascript_tool` |
+| DOM snapshot / find element | `mcp__claude-in-chrome__read_page` / `find` |
+| click / hover / focus | `mcp__claude-in-chrome__computer` (left_click / hover) |
+| screenshot (visual reference — may not save to disk) | `mcp__claude-in-chrome__computer` (screenshot) |
+| set viewport | `mcp__claude-in-chrome__resize_window <w> <h>` |
+| press key | `mcp__claude-in-chrome__computer` (key) |
+
+---
+
+### 1b. OpenCode Browser (`browser_*`) — OpenCode
+
+Uses Playwright/Chromium managed by OpenCode. **Unauthenticated by default** — ideal for public target sites; for authed sites handle login via `browser_evaluate` / `browser_run_code` after navigation.
+
+**Prerequisites (one-time setup):**
+```bash
+npx playwright install chromium
+```
+**Enable in `opencode.json`:**
+```json
+{ "browser": true }
+```
+Or set env: `OPENCODE_ENABLE_BROWSER=true`
+
+**Tool mapping (OpenCode browser):**
+
+| Need | Tool |
+|---|---|
+| open route | `browser_navigate` |
+| run JS / computed styles (ground truth) | `browser_evaluate` |
+| DOM snapshot | `browser_snapshot` or `browser_content` |
+| find element | `browser_search` |
+| click / hover / focus | `browser_click` / `browser_hover` |
+| screenshot **(saves to disk!)** | `browser_screenshot` |
+| set viewport | `browser_run_code` → `await page.setViewportSize({width:1920,height:1080})` |
+| press key | `browser_press_key` |
+| scroll | `browser_scroll` |
+| arbitrary Playwright code | `browser_run_code` |
+
+**Auth for logged-in sites (OpenCode):** After `browser_navigate` to the target URL, use `browser_evaluate` or `browser_run_code` to inject session cookies, or perform a programmatic login flow before running recon. Alternatively, use `browser_run_code` with:
+```js
+await page.context().addCookies([{ name: 'session', value: '...', domain: '...', path: '/' }]);
+```
+
+---
+
+## 2. Screenshots — visual reference (Chrome ext) vs disk artifact (OpenCode)
+
+**Chrome Extension:** screenshots are a **visual reference only** — the file cannot be reliably saved to disk in this environment. Capture with `mcp__claude-in-chrome__computer` (screenshot) for a quick eyeball check, but never build the gate on a PNG.
+
+**OpenCode Browser:** `browser_screenshot` **saves to disk** — you get real PNG files at workspace paths. This enables pixel-diff for public sites (no auth wall). Even so, the objective gate remains **computed styles**: a measured `getComputedStyle` value beats a screenshot impression every time.
+
+**In both modes — the verdict is the computed style, not the image.** The gate (`assert-styles.mjs`) reads `getComputedStyle` values, never a pixel diff. Screenshots are for human eyeballing and catching gross structural issues; they are never the source of a gate decision.
 
 ---
 

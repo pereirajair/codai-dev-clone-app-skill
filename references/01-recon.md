@@ -2,28 +2,50 @@
 
 These instructions are injected AFTER the Stage-1 prompt in `stage-prompts.md`. They obey `00-contract.md` (the authoritative contract). Where this file and the contract disagree, the contract wins.
 
-You are recon for **ONE route at ONE viewport**, driven IN-CONVERSATION by the live Claude session. Recon captures the **real, logged-in** site, so it runs through the **Claude Chrome extension** (`mcp__claude-in-chrome__*`) — you're already authed in Chrome. There is ONE Chrome and ONE tab: do recon sequentially (one route×viewport at a time), never two browser actions at once. Your inputs are `PAGE={PAGE}` and `VIEWPORT={VIEWPORT}` (already substituted by the orchestrator), plus the target URL and the workspace name `{NAME}` from `00-config.json`.
+You are recon for **ONE route at ONE viewport**, driven IN-CONVERSATION by the live Claude session. There is ONE browser session and ONE tab: do recon sequentially (one route×viewport at a time), never two browser actions at once. Your inputs are `PAGE={PAGE}` and `VIEWPORT={VIEWPORT}` (already substituted by the orchestrator), plus the target URL and the workspace name `{NAME}` from `00-config.json`.
+
+**Browser mode:** use whichever is available — Chrome extension (`mcp__claude-in-chrome__*`) or OpenCode browser (`browser_*`). See tool mapping below and `tooling.md §1`.
 
 Your full-page screenshot is the **pixel-diff baseline** for QA (contract §5) — if it is half-rendered, blank, or the wrong size, the entire downstream gate is poisoned. Capture it correctly or BLOCK. Never fabricate a route, a theme, or a framework from memory (contract §7 anti-hallucination).
 
 ---
 
-## Tool: Claude Chrome extension (`mcp__claude-in-chrome__*`)
+## Browser tool — use the one available in your environment
 
-Run everything through the Chrome extension MCP tools — the real authed site lives in your own Chrome. Single Chrome, one tab at a time, sequential: there is no `--session` isolation to set, because there are no concurrent browser agents racing one tab.
+Single session, one tab at a time, sequential. No `--session` isolation, no concurrent browser agents.
 
-The tools you use (see contract §11 for the save-to-file rule):
+### Chrome Extension (`mcp__claude-in-chrome__*`) — Claude Code
+
+Already authed in Chrome; real site loads behind its login.
 
 ```
 mcp__claude-in-chrome__navigate        # open a route in the current tab
 mcp__claude-in-chrome__resize_window   # set the viewport to exact pixels
-mcp__claude-in-chrome__computer        # screenshot (visual reference only), hover, left_click, focus
+mcp__claude-in-chrome__computer        # screenshot (visual reference only — may not save to disk), hover, left_click, focus
 mcp__claude-in-chrome__javascript_tool # run JS in the page, returns the expression's value as JSON
 mcp__claude-in-chrome__read_page       # accessibility/DOM snapshot of interactive elements
 mcp__claude-in-chrome__find            # locate an element/ref on the page
 ```
 
-Capture screenshots with `mcp__claude-in-chrome__computer` action `screenshot` for a visual reference of the route (the file cannot be reliably saved to disk in this environment, so treat the shot as a visual aid, not a workspace artifact). The ground truth for verification is the computed styles you read via `mcp__claude-in-chrome__javascript_tool`. Do NOT use Playwright MCP or SSH.
+### OpenCode Browser (`browser_*`) — OpenCode
+
+Playwright/Chromium — unauthenticated by default (see `tooling.md §1b` for auth setup).
+
+```
+browser_navigate        # open a route
+browser_run_code        # set viewport: await page.setViewportSize({width:W,height:H})
+browser_screenshot      # screenshot — SAVES TO DISK at the path you specify
+browser_evaluate        # run JS in the page (equivalent of javascript_tool) — ground truth
+browser_snapshot        # accessibility/DOM snapshot
+browser_content         # page text/links/inputs snapshot
+browser_search          # locate an element by text/selector
+browser_click           # left-click an element
+browser_hover           # hover an element
+browser_press_key       # keyboard input
+browser_scroll          # scroll the page
+```
+
+**Screenshots:** Chrome extension screenshots are visual references only (file may not persist to disk). OpenCode `browser_screenshot` saves real PNG files to disk. In both modes, **the ground truth is computed styles** (`browser_evaluate` / `javascript_tool`), not a screenshot.
 
 Viewport pixels (contract §1):
 
@@ -51,10 +73,15 @@ Every file you write uses this slug. Get it right or the baseline won't line up 
 
 ## Step 1 — Open, size, and FULLY hydrate
 
+**Chrome extension:**
 1. `mcp__claude-in-chrome__resize_window` → set the window to YOUR `{VIEWPORT}`'s exact pixels (e.g. `1920`×`1080`).
 2. `mcp__claude-in-chrome__navigate` → the target URL for `{PAGE}`.
 
-Modern targets are JS-heavy SPAs. **Do not screenshot a half-rendered page.** Poll for hydration — do not trust a fixed sleep. Loop until the DOM settles (text is present, the body has real height, and no skeleton/spinner remains), with a hard cap. Re-run this `mcp__claude-in-chrome__javascript_tool` call until it returns true (max ~12s):
+**OpenCode browser:**
+1. `browser_run_code` → `await page.setViewportSize({width:1920,height:1080})` (substitute correct viewport values).
+2. `browser_navigate` → the target URL for `{PAGE}`.
+
+Modern targets are JS-heavy SPAs. **Do not screenshot a half-rendered page.** Poll for hydration — do not trust a fixed sleep. Loop until the DOM settles, with a hard cap. Run the JS below via `mcp__claude-in-chrome__javascript_tool` (Chrome ext) or `browser_evaluate` (OpenCode) until it returns true (max ~12s):
 
 ```js
   (() => {
@@ -72,7 +99,7 @@ Modern targets are JS-heavy SPAs. **Do not screenshot a half-rendered page.** Po
   })()
 ```
 
-After hydration looks true, give web fonts and lazy media a final beat so the baseline is deterministic. Run via `mcp__claude-in-chrome__javascript_tool`:
+After hydration looks true, give web fonts and lazy media a final beat. Run via `mcp__claude-in-chrome__javascript_tool` (Chrome ext) or `browser_evaluate` (OpenCode):
 
 ```js
 document.fonts.ready.then(()=>true)
@@ -95,7 +122,7 @@ document.fonts.ready.then(()=>true)
 
 ## Step 2 — AUTH CHECK (do this BEFORE any capture)
 
-Recon runs against the **logged-in** site, so you should normally already be authed in this Chrome. But if the route still bounced to a login/paywall or rendered nothing, there is nothing to clone. Detect it, then **stop** — do not burn the pipeline diffing a login screen (contract §6 auth-wall, §7 anti-hallucination). Run via `mcp__claude-in-chrome__javascript_tool`:
+**Chrome extension:** you're already authed in Chrome. **OpenCode browser:** unauthenticated by default — if the target requires auth, handle it before this step (see `tooling.md §1b`). Either way, detect if the route bounced to a login screen and stop if so. Run via `mcp__claude-in-chrome__javascript_tool` (Chrome ext) or `browser_evaluate` (OpenCode):
 
 ```js
   (() => {
@@ -122,7 +149,7 @@ Capture the full page as a **visual reference** for this route×viewport (contra
 mkdir -p "clone-workspace/{NAME}/01-recon/fragments"
 ```
 
-Take the shot with `mcp__claude-in-chrome__computer` — action `screenshot`, full page (not just the viewport):
+Take the screenshot: **Chrome ext** → `mcp__claude-in-chrome__computer` action `screenshot` (visual reference only; may not save to disk). **OpenCode** → `browser_screenshot` with a path like `clone-workspace/{NAME}/01-recon/screenshots/{page-slug}--{VIEWPORT}.png` (saves to disk).
 
 It MUST capture the FULL page (not just the viewport), one capture per route×viewport, so the visual reference is complete. The measured `getComputedStyle` values (Steps 5–7) and the per-archetype computed styles the extraction stage reads are what QA diffs 1:1 — the visual capture only helps you spot obvious breakage.
 

@@ -1,6 +1,6 @@
 # Stage 9: Polish Agent Reference (per-page)
 
-**IMPORTANT**: Polish drives the browser with the **Claude Chrome extension** (`mcp__claude-in-chrome__*`) — no CLI browser, no SSH, no Mac Mini, no setup. Open the localhost clone with `mcp__claude-in-chrome__navigate` and do every residual check via `mcp__claude-in-chrome__javascript_tool` (computed-style reads compared against `DESIGN.md` tokens). One Chrome, one view at a time — polish agents run sequentially per page; never run two browser actions at once.
+**IMPORTANT**: Polish drives the browser with whatever tool is available in your environment — **Chrome extension** (`mcp__claude-in-chrome__*`) OR **OpenCode browser** (`browser_*`). Open the localhost clone and do every residual check via the JS-execution tool (`mcp__claude-in-chrome__javascript_tool` or `browser_evaluate`) to read computed styles against `DESIGN.md` tokens. One view at a time — polish agents run sequentially per page; never run two browser actions at once. See `tooling.md §1` for full tool mapping.
 
 You are the **Polish Agent for ONE page**. You run **only after the orchestrator reaches the terminal state `CONVERGED-PASS`** (see contract §5 gate, §6 loop) — never before. By the time you start, the QA gate is already satisfied for your page: `style_assertions.failed == 0` and `npm run build` exits 0. Your job is to close the **residual sub-pixel gap** — the last fraction of a property delta that is technically within the gate's ±1px / ±0.01em tolerance but would still let a designer's eye catch the difference. You are not finding new bugs; the QA↔Fix loop already converged. You are tightening the regions the QA computed-style assertions still flag as non-zero deltas.
 
@@ -30,7 +30,7 @@ The old approach of manually walking every element by hand is **deleted**. It do
 ### Step A — Map the residual regions
 
 1. Read the `style_assertions` block for `{PAGE}` in `06-qa/cycle-{N}/diff/metrics.json`. Identify each selector whose computed value still carries a non-zero delta from its `DESIGN.md` expected value (passing within tolerance is still a residual). Note its on-page location (e.g. "hero CTA", "pricing card shadow band", "footer link row").
-2. Open the clone with `mcp__claude-in-chrome__navigate` to `http://localhost:3000/{route}`, and take a visual extension screenshot (`mcp__claude-in-chrome__computer` `screenshot`) as an eyeball reference. Compare it against the recon baseline `01-recon/screenshots/{page}--desktop.png` at the same scroll position to confirm which element(s) sit under each residual selector.
+2. Open the clone (`mcp__claude-in-chrome__navigate` or `browser_navigate`) to `http://localhost:3000/{route}`, and take a screenshot (`mcp__claude-in-chrome__computer screenshot` or `browser_screenshot`) as an eyeball reference. Compare it against the recon baseline `01-recon/screenshots/{page}--desktop.png` at the same scroll position to confirm which element(s) sit under each residual selector.
 3. This selector set — and ONLY this set — is your polish work list. Anything the assertions show at exact match is out of scope.
 
 ### Step B — Run assert-styles against the residual regions
@@ -43,7 +43,7 @@ node scripts/assert-styles.mjs --page {PAGE} --url http://localhost:3000/{route}
 
 `assert-styles.mjs` reads `DESIGN.md` tokens and compares each selector's computed `color / backgroundColor / backgroundImage / fontSize / fontWeight / letterSpacing / lineHeight / borderRadius / boxShadow / cursor / transition` against the spec — colors normalized to `rgb()`, numerics within ±1px / ±0.01em (contract §5). For every selector that maps to a residual region, read its computed-vs-expected delta directly from the comparator output. Trust the measured number, never the screenshot impression. If a property is at the edge of the ±1px / ±0.01em tolerance (passes the gate but is non-zero), tighten it to exact — that residual delta is precisely what a designer's eye catches.
 
-For any property assert-styles does not cover (gradient stop positions, per-side radius asymmetry, layered/inset shadow ordering, backdrop-filter, focus-ring geometry), drop to a targeted computed-style read on the specific residual element only, via `mcp__claude-in-chrome__javascript_tool`:
+For any property assert-styles does not cover (gradient stop positions, per-side radius asymmetry, layered/inset shadow ordering, backdrop-filter, focus-ring geometry), drop to a targeted computed-style read on the specific residual element only, via `mcp__claude-in-chrome__javascript_tool` (Chrome ext) or `browser_evaluate` (OpenCode):
 
 ```js
 // mcp__claude-in-chrome__javascript_tool — ONLY for the element under a residual region
@@ -64,7 +64,7 @@ const cs = getComputedStyle(el);
 
 ### Step C — Fix and re-verify
 
-Apply minimal, targeted property fixes to the page code for `{PAGE}` (no refactors, no new components, no shared-file edits). After each fix, re-run assert-styles for the page and re-read the affected element's computed style via `mcp__claude-in-chrome__javascript_tool` (reload the route with `mcp__claude-in-chrome__navigate` first). If a fix does not reduce the residual delta — or makes the computed values diverge further from the spec — revert it.
+Apply minimal, targeted property fixes to the page code for `{PAGE}` (no refactors, no new components, no shared-file edits). After each fix, re-run assert-styles for the page and re-read the affected element's computed style via `mcp__claude-in-chrome__javascript_tool` / `browser_evaluate` (reload the route first with `mcp__claude-in-chrome__navigate` / `browser_navigate`). If a fix does not reduce the residual delta — or makes the computed values diverge further from the spec — revert it.
 
 ---
 
@@ -147,7 +147,7 @@ Tab through `{PAGE}` with the keyboard (drive focus via `mcp__claude-in-chrome__
 
 ### 7. Responsive smooth-resize
 
-Although your final screenshot is desktop, resize the viewport with `mcp__claude-in-chrome__resize_window` from 1920px down to 375px and watch for residuals that only appear mid-range:
+Although your final screenshot is desktop, resize the viewport (Chrome ext: `mcp__claude-in-chrome__resize_window`; OpenCode: `browser_run_code` → `await page.setViewportSize({width:W,height:H})`) from 1920px down to 375px and watch for residuals that only appear mid-range:
 
 - No layout break at any intermediate width (e.g. 900px, 700px, 500px)
 - No horizontal scrollbar appears at any width
@@ -160,7 +160,7 @@ Fix any break found at a non-standard (between-breakpoint) width.
 
 ### 8. Dark mode completeness (if the original has it)
 
-Toggle dark mode and walk `{PAGE}` against the dark theme tokens in `css-variables.json` / `DESIGN.md` (read each element's computed background/text/border/shadow via `javascript_tool` in the dark state):
+Toggle dark mode and walk `{PAGE}` against the dark theme tokens in `css-variables.json` / `DESIGN.md` (read each element's computed background/text/border/shadow via `mcp__claude-in-chrome__javascript_tool` / `browser_evaluate` in the dark state):
 
 - Every background and text token has a correct dark counterpart — no white-on-white, no black-on-black
 - Shadows remain visible on dark backgrounds (may need lighter/more-spread values)
@@ -173,12 +173,19 @@ Toggle dark mode and walk `{PAGE}` against the dark theme tokens in `css-variabl
 ## Outputs (exact paths — contract §1)
 
 1. **Edits in the output dir** — minimal, targeted property fixes to route `{PAGE}` only.
-2. **Final full-page screenshot** of the polished page (visual eyeball reference, not a pixel-diff source), via the Chrome extension:
+2. **Final full-page screenshot** of the polished page (visual eyeball reference, not a pixel-diff source):
 
+**Chrome extension:**
 ```text
 mcp__claude-in-chrome__navigate  →  http://localhost:3000/{route}
 mcp__claude-in-chrome__computer  →  screenshot (save_to_disk: true)
 cp <returned-path>  →  clone-workspace/{name}/09-polish/final-screenshots/{page-slug}--desktop.png
+```
+
+**OpenCode browser:**
+```text
+browser_navigate    →  http://localhost:3000/{route}
+browser_screenshot  →  clone-workspace/{name}/09-polish/final-screenshots/{page-slug}--desktop.png
 ```
 
 The screenshot should be FULL-PAGE desktop (1920 wide) so it lines up 1:1 with the recon baseline `01-recon/screenshots/{page}--desktop.png` for side-by-side eyeball comparison. Page-slug rule (contract §1): route `/` → `home`, `/pricing` → `pricing`, `/blog/post` → `blog-post`.

@@ -2,21 +2,23 @@
 
 Every stage agent, the in-conversation orchestrator (the live Claude session), and the verification scripts obey THIS file. It defines the workspace layout, the exact artifact filenames each stage reads and writes, the parallel fan-out keys, the computed-style-assertion gate, the convergence loop, and the agent-prompt standard. If a stage prompt and this contract disagree, the contract wins.
 
-This skill runs **IN-CONVERSATION**: the live Claude orchestrates Task sub-agents, drives the **Claude Chrome extension** (`mcp__claude-in-chrome__*`) to recon/extract/QA, and runs the helper scripts via Bash. Because you're already logged into Chrome, the browser reaches authed sites. There is **one Chrome** — browser stages are **sequential** (one view/tab at a time); **code stages fan out in parallel** via Task sub-agents.
+This skill runs **IN-CONVERSATION**: the live Claude orchestrates Task sub-agents, drives a browser to recon/extract/QA, and runs the helper scripts via Bash. There is **one browser session** — browser stages are **sequential** (one view/tab at a time); **code stages fan out in parallel** via Task sub-agents.
 
 The mission: **own the target — pixel for pixel.** Extract every value that exists in the live page (read off the DOM/CSSOM, not a screenshot guess), rebuild it, and prove the match with **measured computed-style assertions**, not an opinion. Leave no stone unturned.
 
-**Browser tool = the Claude Chrome extension.** Use it for every browser action:
+**Browser tool — detect your environment at startup** (see `references/tooling.md §1` for full mapping):
 
-| Need | Chrome-extension tool |
-|---|---|
-| open a route | `mcp__claude-in-chrome__navigate` |
-| read computed styles / CSSOM / run JS (the verification ground truth) | `mcp__claude-in-chrome__javascript_tool` |
-| read DOM / find elements | `mcp__claude-in-chrome__read_page` / `find` |
-| click / hover / focus (interaction sweep) + visual-reference screenshot | `mcp__claude-in-chrome__computer` |
-| set viewport | `mcp__claude-in-chrome__resize_window` |
+| Need | Chrome Extension (`mcp__claude-in-chrome__*`) | OpenCode (`browser_*`) |
+|---|---|---|
+| open a route | `mcp__claude-in-chrome__navigate` | `browser_navigate` |
+| run JS / computed styles (ground truth) | `mcp__claude-in-chrome__javascript_tool` | `browser_evaluate` |
+| DOM snapshot / find | `mcp__claude-in-chrome__read_page` / `find` | `browser_snapshot` / `browser_search` |
+| click / hover / focus + screenshot | `mcp__claude-in-chrome__computer` | `browser_click` / `browser_hover` / `browser_screenshot` |
+| set viewport | `mcp__claude-in-chrome__resize_window` | `browser_run_code` → `await page.setViewportSize({width:W,height:H})` |
 
-Asset/font byte downloads and cross-origin sheet refetch use **Bash `curl`** (not browser-specific). The objective ground truth is **computed styles read via `javascript_tool`**, never a screenshot.
+**Auth:** Chrome extension uses your already-logged-in Chrome (reaches authed sites). OpenCode browser (Playwright) is unauthenticated by default — inject cookies or run a login flow via `browser_run_code` for authed targets.
+
+Asset/font byte downloads and cross-origin sheet refetch use **Bash `curl`** (not browser-specific). The objective ground truth is **computed styles read via the JS-execution tool** (`javascript_tool` or `browser_evaluate`), never a screenshot.
 
 ---
 
@@ -198,13 +200,13 @@ while cycle < MAX_CYCLES:
 Each stage runs as a Task sub-agent with NO memory of other agents. Every stage prompt MUST contain, in this order:
 1. **ROLE** — one line: "You are the {stage} agent in a pixel-perfect cloning pipeline."
 2. **INPUTS** — exact artifact paths it reads (from §1).
-3. **TASK** — numbered steps; any browser work uses the **Claude Chrome extension** (`mcp__claude-in-chrome__*`: `navigate`, `javascript_tool`, `read_page`/`find`, `computer`, `resize_window`).
+3. **TASK** — numbered steps; any browser work uses the available browser tool — Chrome extension (`mcp__claude-in-chrome__*`: `navigate`, `javascript_tool`, `read_page`/`find`, `computer`, `resize_window`) OR OpenCode (`browser_navigate`, `browser_evaluate`, `browser_snapshot`/`browser_search`, `browser_click`/`browser_hover`, `browser_screenshot`, `browser_run_code`).
 4. **OUTPUTS** — exact artifact paths it writes (from §1). Nothing else.
 5. **EVIDENCE RULES** — every visual claim needs a measured `evidence_method` (a `getComputedStyle` value read via `javascript_tool`). Never assert a match without measurement. Authoritative-source order from §3.
 6. **ANTI-HALLUCINATION** — never invent values; if a value can't be read, record `null` + why. Never generate UI from memory; if the page can't be reached, emit `<promise>BLOCKED: reason</promise>`.
 7. **COMPLETION** — write outputs, set this task's flag in `status.json`, end with `<promise>CONTINUE</promise>` (or `<promise>BLOCKED: …</promise>`).
 
-**There is one Chrome and no per-task browser sessions.** Browser-touching stages (recon, extraction, QA read) run **sequentially** through the single Claude Chrome extension — there are no `--session` keys and no parallel browser. Parallelism comes from **code stages**: build-pages and fixes fan out via Task sub-agents keyed `{name}-{role}-{page}[-c{cycle}]` (each edits its own disjoint files), while the browser work stays sequential. Browser tooling: the Claude Chrome extension only — never Playwright MCP / SSH.
+**There is one browser session and no per-task browser sessions.** Browser-touching stages (recon, extraction, QA read) run **sequentially** — there are no `--session` keys and no parallel browser. Parallelism comes from **code stages**: build-pages and fixes fan out via Task sub-agents keyed `{name}-{role}-{page}[-c{cycle}]` (each edits its own disjoint files), while the browser work stays sequential. Browser tooling: Claude Chrome extension (`mcp__claude-in-chrome__*`) OR OpenCode browser (`browser_*`) — never SSH.
 
 ---
 

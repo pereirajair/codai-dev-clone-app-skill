@@ -17,19 +17,25 @@ This skill runs as a **workflow inside a live Claude session**, not a background
 
 **Browser tool** — use whichever is available in your environment. **One view/tab at a time** (browser stages are sequential). **Code stages fan out in parallel** via Task sub-agents.
 
-**Detect your browser mode at startup:** if `mcp__claude-in-chrome__navigate` is available → Chrome Extension mode; if `browser_navigate` is available → OpenCode Browser mode. See [references/tooling.md](references/tooling.md) for full setup and tool mapping.
+**Detect your browser mode at startup:** if `mcp__claude-in-chrome__navigate` is available → Chrome Extension mode (Claude Code); if `browser_navigate` is available → BrowserMCP mode (OpenCode). See [references/tooling.md](references/tooling.md) for setup and full tool mapping.
 
-| Need | Chrome Extension (`mcp__claude-in-chrome__*`) | OpenCode (`browser_*`) |
+| Need | Chrome Extension (`mcp__claude-in-chrome__*`) | BrowserMCP (`browser_*`) |
 |---|---|---|
 | open a route | `mcp__claude-in-chrome__navigate` | `browser_navigate` |
-| run JS / computed styles (ground truth) | `mcp__claude-in-chrome__javascript_tool` | `browser_evaluate` |
-| DOM snapshot / find elements | `mcp__claude-in-chrome__read_page` / `find` | `browser_snapshot` / `browser_search` |
-| click / hover / focus | `mcp__claude-in-chrome__computer` (left_click/hover) | `browser_click` / `browser_hover` |
-| screenshot | `mcp__claude-in-chrome__computer` (screenshot) | `browser_screenshot` (saves to disk!) |
-| set viewport | `mcp__claude-in-chrome__resize_window` | `browser_run_code` → `await page.setViewportSize({width:W,height:H})` |
-| press key / scroll | `mcp__claude-in-chrome__computer` (key) | `browser_press_key` / `browser_scroll` |
+| **run JS / computed styles (ground truth)** | `mcp__claude-in-chrome__javascript_tool` | ⚠️ **not available** — see note below |
+| DOM / ARIA snapshot | `mcp__claude-in-chrome__read_page` / `find` | `browser_snapshot` |
+| click | `mcp__claude-in-chrome__computer` (left_click) | `browser_click` |
+| hover | `mcp__claude-in-chrome__computer` (hover) | `browser_hover` |
+| type text | `mcp__claude-in-chrome__computer` (type) | `browser_type` |
+| screenshot (visual reference) | `mcp__claude-in-chrome__computer` (screenshot) | `browser_screenshot` (base64, visual ref only) |
+| press key | `mcp__claude-in-chrome__computer` (key) | `browser_press_key` |
+| set viewport | `mcp__claude-in-chrome__resize_window` | ⚠️ **not available** |
+| wait | JS `setTimeout` via `javascript_tool` | `browser_wait` |
+| console logs | — | `browser_get_console_logs` |
 
-**Auth note:** Chrome extension uses your already-logged-in Chrome session (reaches authed sites). OpenCode browser is Playwright/Chromium — unauthenticated by default. For authed target sites use the Chrome extension, or handle login programmatically via `browser_evaluate` / `browser_run_code`.
+**Auth:** Both tools use your real Chrome session — BrowserMCP also connects to your existing Chrome profile via Native Messaging, so authed sites load normally in both modes.
+
+**⚠️ BrowserMCP critical limitation:** BrowserMCP has **no JS execution tool** (`browser_evaluate` / `browser_execute` do not exist). This means `getComputedStyle` reads — the pipeline's core verification mechanism — are not available in BrowserMCP mode. BrowserMCP is suitable for navigation, interaction sweeps, ARIA snapshots, and screenshots during **recon and build review**. The **QA computed-style gate** (Stages 6–7) requires the Chrome Extension (`mcp__claude-in-chrome__javascript_tool`). If only BrowserMCP is available, the QA gate must be run on the Bash side via `node scripts/assert-styles.mjs` with a running dev server instead of in-browser reads.
 
 **Screenshots are a VISUAL REFERENCE only.** The extension can't reliably write screenshot files to disk in this environment, so **do not build the gate on saved PNGs / pixel-diff.** Screenshots are for you and the user to eyeball the real site vs the clone. The **objective ground truth is computed styles** read via `javascript_tool` (the contract's own rule: CSSOM/computed values beat screenshots).
 

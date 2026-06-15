@@ -27,25 +27,26 @@ mcp__claude-in-chrome__read_page       # accessibility/DOM snapshot of interacti
 mcp__claude-in-chrome__find            # locate an element/ref on the page
 ```
 
-### OpenCode Browser (`browser_*`) — OpenCode
+### BrowserMCP (`browser_*`) — OpenCode
 
-Playwright/Chromium — unauthenticated by default (see `tooling.md §1b` for auth setup).
+Uses your real Chrome profile via Native Messaging — authed sites load normally. Install the Chrome extension from [browsermcp.io](https://browsermcp.io) and add to `opencode.json` (see `tooling.md §1b`).
 
 ```
 browser_navigate        # open a route
-browser_run_code        # set viewport: await page.setViewportSize({width:W,height:H})
-browser_screenshot      # screenshot — SAVES TO DISK at the path you specify
-browser_evaluate        # run JS in the page (equivalent of javascript_tool) — ground truth
-browser_snapshot        # accessibility/DOM snapshot
-browser_content         # page text/links/inputs snapshot
-browser_search          # locate an element by text/selector
-browser_click           # left-click an element
+browser_go_back         # navigate back
+browser_go_forward      # navigate forward
+browser_snapshot        # ARIA accessibility tree + element selectors (replaces read_page/find)
+browser_click           # click an element (by label/aria description)
 browser_hover           # hover an element
+browser_type            # type text into an element
+browser_select_option   # select dropdown option
 browser_press_key       # keyboard input
-browser_scroll          # scroll the page
+browser_wait            # wait N seconds
+browser_screenshot      # screenshot (base64 image — visual reference, NOT a disk file)
+browser_get_console_logs # retrieve browser console output
 ```
 
-**Screenshots:** Chrome extension screenshots are visual references only (file may not persist to disk). OpenCode `browser_screenshot` saves real PNG files to disk. In both modes, **the ground truth is computed styles** (`browser_evaluate` / `javascript_tool`), not a screenshot.
+**⚠️ BrowserMCP does NOT have:** JS execution (`browser_evaluate`/`browser_execute`), viewport resize, `browser_scroll`. This means **computed-style reads are not possible** in BrowserMCP mode. Recon interaction sweeps (click everything, snapshot, screenshot) work fully; computed-style extraction and QA gate require the Chrome extension. Use `browser_snapshot` to locate elements and confirm revealed UI instead of `javascript_tool` confirmation.
 
 Viewport pixels (contract §1):
 
@@ -77,11 +78,11 @@ Every file you write uses this slug. Get it right or the baseline won't line up 
 1. `mcp__claude-in-chrome__resize_window` → set the window to YOUR `{VIEWPORT}`'s exact pixels (e.g. `1920`×`1080`).
 2. `mcp__claude-in-chrome__navigate` → the target URL for `{PAGE}`.
 
-**OpenCode browser:**
-1. `browser_run_code` → `await page.setViewportSize({width:1920,height:1080})` (substitute correct viewport values).
-2. `browser_navigate` → the target URL for `{PAGE}`.
+**BrowserMCP:** No viewport resize tool — skip the resize step and proceed directly:
+1. `browser_navigate` → the target URL for `{PAGE}`.
+(Note: without viewport control, the page renders at Chrome's current window size. Ask the user to resize Chrome manually to match the target viewport before running recon if exact dimensions are required.)
 
-Modern targets are JS-heavy SPAs. **Do not screenshot a half-rendered page.** Poll for hydration — do not trust a fixed sleep. Loop until the DOM settles, with a hard cap. Run the JS below via `mcp__claude-in-chrome__javascript_tool` (Chrome ext) or `browser_evaluate` (OpenCode) until it returns true (max ~12s):
+Modern targets are JS-heavy SPAs. **Do not screenshot a half-rendered page.** Poll for hydration — do not trust a fixed sleep. **Chrome extension:** run the JS below via `mcp__claude-in-chrome__javascript_tool` until it returns true (max ~12s). **BrowserMCP:** no JS execution — use `browser_wait` for a fixed settle (e.g. `browser_wait 3`) then take the snapshot.
 
 ```js
   (() => {
@@ -99,7 +100,7 @@ Modern targets are JS-heavy SPAs. **Do not screenshot a half-rendered page.** Po
   })()
 ```
 
-After hydration looks true, give web fonts and lazy media a final beat. Run via `mcp__claude-in-chrome__javascript_tool` (Chrome ext) or `browser_evaluate` (OpenCode):
+After hydration looks true (Chrome ext only — BrowserMCP: use `browser_wait 2` instead), give web fonts and lazy media a final beat via `mcp__claude-in-chrome__javascript_tool`:
 
 ```js
 document.fonts.ready.then(()=>true)
@@ -122,7 +123,7 @@ document.fonts.ready.then(()=>true)
 
 ## Step 2 — AUTH CHECK (do this BEFORE any capture)
 
-**Chrome extension:** you're already authed in Chrome. **OpenCode browser:** unauthenticated by default — if the target requires auth, handle it before this step (see `tooling.md §1b`). Either way, detect if the route bounced to a login screen and stop if so. Run via `mcp__claude-in-chrome__javascript_tool` (Chrome ext) or `browser_evaluate` (OpenCode):
+Both Chrome extension and BrowserMCP use your real Chrome session. If the route redirects to login anyway (session expired), stop. **Chrome extension:** run the JS auth-check below via `mcp__claude-in-chrome__javascript_tool`. **BrowserMCP:** no JS execution — use `browser_snapshot` and inspect the ARIA tree for login form elements (`input[type=password]`, login/sign-in labels). If detected, emit `<promise>BLOCKED: auth wall at {PAGE}</promise>`.
 
 ```js
   (() => {
@@ -149,7 +150,7 @@ Capture the full page as a **visual reference** for this route×viewport (contra
 mkdir -p "clone-workspace/{NAME}/01-recon/fragments"
 ```
 
-Take the screenshot: **Chrome ext** → `mcp__claude-in-chrome__computer` action `screenshot` (visual reference only; may not save to disk). **OpenCode** → `browser_screenshot` with a path like `clone-workspace/{NAME}/01-recon/screenshots/{page-slug}--{VIEWPORT}.png` (saves to disk).
+Take the screenshot: **Chrome ext** → `mcp__claude-in-chrome__computer` action `screenshot` (visual reference only; may not save to disk). **BrowserMCP** → `browser_screenshot` (returns base64 image, visual reference only — not a disk file).
 
 It MUST capture the FULL page (not just the viewport), one capture per route×viewport, so the visual reference is complete. The measured `getComputedStyle` values (Steps 5–7) and the per-archetype computed styles the extraction stage reads are what QA diffs 1:1 — the visual capture only helps you spot obvious breakage.
 
@@ -198,7 +199,8 @@ The rule is literal: **click EVERY button and open EVERY side panel, menu, filte
 
 Use `mcp__claude-in-chrome__javascript_tool` to list every interactive element on the route — buttons, links, menu/dropdown triggers, tabs, view switchers (board/list/kanban), filter controls, every row/card that opens a side panel or detail, every input and `contenteditable`. Assign a stable ref and a filename slug to each, just like Step 4 — but here you keep ALL of them, not a slice. (`mcp__claude-in-chrome__read_page` is the quickest way to list the current interactive refs + labels; the JS below also tags each with a `data-recon-ix` attribute so you can act on them afterward.)
 
-`mcp__claude-in-chrome__read_page` → list current interactive refs + labels. Then enumerate + tag with `mcp__claude-in-chrome__javascript_tool`:
+**Chrome ext:** `mcp__claude-in-chrome__read_page` → list current interactive refs + labels; then enumerate + tag with `mcp__claude-in-chrome__javascript_tool`.
+**BrowserMCP:** `browser_snapshot` → lists all interactive elements with ARIA labels and selectors. Use the returned selectors directly for `browser_click`/`browser_hover`/`browser_type` — no JS tagging step needed.
 
 ```js
   (() => {

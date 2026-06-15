@@ -39,49 +39,59 @@ You're already authed in Chrome, so the real target loads behind its login. The 
 
 ---
 
-### 1b. OpenCode Browser (`browser_*`) — OpenCode
+### 1b. BrowserMCP (`browser_*`) — OpenCode
 
-Uses Playwright/Chromium managed by OpenCode. **Unauthenticated by default** — ideal for public target sites; for authed sites handle login via `browser_evaluate` / `browser_run_code` after navigation.
+BrowserMCP uses your **real Chrome** via a Chrome extension + Native Messaging — the same approach as the Claude Chrome extension. Your existing Chrome profile is used, so **authed sites load normally** without extra login setup.
 
-**Prerequisites (one-time setup):**
-```bash
-npx playwright install chromium
-```
-**Enable in `opencode.json`:**
+**Setup (one-time):**
+1. Install the Chrome extension from [browsermcp.io](https://browsermcp.io)
+2. Add to `opencode.json`:
+
 ```json
-{ "browser": true }
+{
+  "mcp": {
+    "browsermcp": {
+      "type": "local",
+      "command": ["npx", "@browsermcp/mcp@latest"],
+      "enabled": true
+    }
+  }
+}
 ```
-Or set env: `OPENCODE_ENABLE_BROWSER=true`
 
-**Tool mapping (OpenCode browser):**
+**Full tool list (BrowserMCP `@browsermcp/mcp` v0.1.3):**
 
-| Need | Tool |
+| Tool | What it does |
 |---|---|
-| open route | `browser_navigate` |
-| run JS / computed styles (ground truth) | `browser_evaluate` |
-| DOM snapshot | `browser_snapshot` or `browser_content` |
-| find element | `browser_search` |
-| click / hover / focus | `browser_click` / `browser_hover` |
-| screenshot **(saves to disk!)** | `browser_screenshot` |
-| set viewport | `browser_run_code` → `await page.setViewportSize({width:1920,height:1080})` |
-| press key | `browser_press_key` |
-| scroll | `browser_scroll` |
-| arbitrary Playwright code | `browser_run_code` |
+| `browser_navigate` | Open a URL in the current tab |
+| `browser_go_back` | Navigate back |
+| `browser_go_forward` | Navigate forward |
+| `browser_snapshot` | ARIA accessibility tree + element selectors |
+| `browser_click` | Click an element (by label/aria description) |
+| `browser_hover` | Hover over an element |
+| `browser_type` | Type text into an element |
+| `browser_select_option` | Select a dropdown option |
+| `browser_press_key` | Press a keyboard key |
+| `browser_wait` | Wait N seconds |
+| `browser_screenshot` | Capture screenshot (returns **base64 PNG** — visual reference, not a disk file) |
+| `browser_get_console_logs` | Retrieve browser console output |
 
-**Auth for logged-in sites (OpenCode):** After `browser_navigate` to the target URL, use `browser_evaluate` or `browser_run_code` to inject session cookies, or perform a programmatic login flow before running recon. Alternatively, use `browser_run_code` with:
-```js
-await page.context().addCookies([{ name: 'session', value: '...', domain: '...', path: '/' }]);
-```
+**❌ NOT available in BrowserMCP:**
+- `browser_evaluate` / JS execution — **no JavaScript execution tool exists**
+- Viewport resize — no equivalent to `resize_window`
+- `browser_scroll`, `browser_search`, `browser_run_code`, `browser_drag` (drag is defined in source but not registered)
+
+**⚠️ Critical limitation for this skill:** The clone pipeline's core mechanism is `getComputedStyle` read via JS execution. BrowserMCP has no JS execution tool, so **Stage 2 (Extraction), Stage 6 (QA), and Stage 9 (Polish)** cannot use BrowserMCP for computed-style reads. BrowserMCP is usable for Stage 1 (Recon) interaction sweeps — navigation, clicks, snapshots, screenshots. For JS-dependent stages, the Chrome Extension (Claude Code) or fallback Bash scripts are required.
 
 ---
 
-## 2. Screenshots — visual reference (Chrome ext) vs disk artifact (OpenCode)
+## 2. Screenshots — visual reference in both modes
 
-**Chrome Extension:** screenshots are a **visual reference only** — the file cannot be reliably saved to disk in this environment. Capture with `mcp__claude-in-chrome__computer` (screenshot) for a quick eyeball check, but never build the gate on a PNG.
+**Chrome Extension:** `mcp__claude-in-chrome__computer` (screenshot) — visual reference only; the file cannot be reliably saved to disk in this environment.
 
-**OpenCode Browser:** `browser_screenshot` **saves to disk** — you get real PNG files at workspace paths. This enables pixel-diff for public sites (no auth wall). Even so, the objective gate remains **computed styles**: a measured `getComputedStyle` value beats a screenshot impression every time.
+**BrowserMCP:** `browser_screenshot` — returns **base64 PNG** inline (not a disk file). Same status as the Chrome extension: a visual aid for eyeballing, never a gate input.
 
-**In both modes — the verdict is the computed style, not the image.** The gate (`assert-styles.mjs`) reads `getComputedStyle` values, never a pixel diff. Screenshots are for human eyeballing and catching gross structural issues; they are never the source of a gate decision.
+**In both modes — the gate is computed styles, not screenshots.** The gate (`assert-styles.mjs`) reads `getComputedStyle` values. Screenshots help catch gross layout issues; they never drive a pass/fail decision.
 
 ---
 

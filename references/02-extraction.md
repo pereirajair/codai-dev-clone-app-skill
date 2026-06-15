@@ -4,7 +4,7 @@
 
 This file is the Stage 2 reference (see `stage-prompts.md` → `## Stage 2: Extraction`). It implements **contract §3 (A–I)** exactly and writes **only** the artifact paths in **contract §1**. When this file and `00-contract.md` disagree, the contract wins.
 
-**Browser tool — use whichever is available** (Chrome extension or OpenCode; see `tooling.md §1`). Extraction reads values off the REAL site — ensure you're authenticated if the target requires it. Every JS capture below runs through `mcp__claude-in-chrome__javascript_tool` (Chrome ext) or `browser_evaluate` (OpenCode); navigation through `mcp__claude-in-chrome__navigate` / `browser_navigate`; DOM reads through `read_page`/`find` / `browser_snapshot`/`browser_search` / a JS `outerHTML` read. Asset/font byte downloads and cross-origin stylesheet refetches stay as Bash `curl` (not browser-tool-specific). There is **one browser session**: run extraction **sequentially, one route / one tab at a time** — never two browser actions at once.
+**Browser tool — Extraction requires JavaScript execution.** BrowserMCP has no JS execution tool, so **Extraction (Stage 2) requires the Chrome Extension** (`mcp__claude-in-chrome__*`). Every JS capture below runs through `mcp__claude-in-chrome__javascript_tool`; navigation through `mcp__claude-in-chrome__navigate`; DOM reads through `read_page`/`find` / a JS `outerHTML` read. Asset/font byte downloads and cross-origin stylesheet refetches stay as Bash `curl` (not browser-tool-specific). There is **one Chrome**: run extraction **sequentially, one route / one tab at a time** — never two browser actions at once.
 
 ---
 
@@ -15,7 +15,7 @@ This file is the Stage 2 reference (see `stage-prompts.md` → `## Stage 2: Extr
 - `clone-workspace/{name}/01-recon/sitemap.json` — `{ "routes": [...] }`. You extract **one `{PAGE}` at a time** (sequential — one Chrome, one tab).
 - `clone-workspace/{name}/01-recon/recon.json` — may already carry `themes` and the framework fingerprint (§3-I). Read it; do not re-derive what's already measured.
 
-**Tool: use whichever browser is available** — Chrome extension (`mcp__claude-in-chrome__*`) OR OpenCode (`browser_*`). JS runs via `mcp__claude-in-chrome__javascript_tool` / `browser_evaluate`; navigation via `mcp__claude-in-chrome__navigate` / `browser_navigate`; DOM reads via `read_page`/`find` / `browser_snapshot`/`browser_search`. No `--session` isolation, no SSH. One browser session: run routes **sequentially, one tab at a time**. Set per-route path vars in the shell for the `curl` downloads/refetches:
+**Tool: Chrome Extension only for Extraction** (`mcp__claude-in-chrome__*`). JS runs via `mcp__claude-in-chrome__javascript_tool`; navigation via `mcp__claude-in-chrome__navigate`; DOM reads via `read_page`/`find`. No `--session` isolation, no SSH. One Chrome: run routes **sequentially, one tab at a time**. Set per-route path vars in the shell for the `curl` downloads/refetches:
 
 ```bash
 URL="$(jq -r .target_url clone-workspace/{name}/00-config.json)"
